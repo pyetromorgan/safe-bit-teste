@@ -1,5 +1,4 @@
-
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -12,49 +11,94 @@ import {
   ActivityIndicator,
 } from 'react-native';
 
-const receitasDemo = [
-  {
-    id: 'demo-1',
-    titulo: 'Panqueca de banana',
-    descricao: 'Uma opção simples para o café da manhã.',
-    imagem_url: null,
-  },
-  {
-    id: 'demo-2',
-    titulo: 'Salada colorida',
-    descricao: 'Uma combinação de vegetais frescos.',
-    imagem_url: null,
-  },
-  {
-    id: 'demo-3',
-    titulo: 'Creme de abacate',
-    descricao: 'Uma preparação cremosa e fácil.',
-    imagem_url: null,
-  },
-];
+import apiService from '../services/api';
 
 export default function ReceitasScreen({ navigation }) {
   const [pesquisa, setPesquisa] = useState('');
-  const [carregando] = useState(false);
-  const [modoDemo] = useState(true);
+  const [receitas, setReceitas] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
 
-  const receitas = useMemo(() => {
+  const carregarReceitas = useCallback(async () => {
+    try {
+      setCarregando(true);
+      setErro('');
+
+      const resposta = await apiService.listRecipes({ limit: 100 });
+
+      // Aceita os formatos de resposta mais comuns da API.
+      const lista =
+        Array.isArray(resposta) ? resposta :
+        Array.isArray(resposta?.data) ? resposta.data :
+        Array.isArray(resposta?.data?.receitas) ? resposta.data.receitas :
+        Array.isArray(resposta?.data?.recipes) ? resposta.data.recipes :
+        Array.isArray(resposta?.receitas) ? resposta.receitas :
+        Array.isArray(resposta?.recipes) ? resposta.recipes :
+        Array.isArray(resposta?.results) ? resposta.results :
+        Array.isArray(resposta?.data?.results) ? resposta.data.results :
+        [];
+
+      setReceitas(
+        lista.map((receita) => ({
+          ...receita,
+          id: String(
+            receita.id ??
+            receita._id ??
+            receita.receita_id ??
+            ''
+          ),
+          titulo:
+            receita.titulo ??
+            receita.nome ??
+            receita.title ??
+            'Receita sem título',
+          descricao:
+            receita.descricao ??
+            receita.description ??
+            '',
+          imagem_url:
+            receita.imagem_url ??
+            receita.image_url ??
+            receita.imagem ??
+            receita.foto_url ??
+            receita.image ??
+            null,
+        }))
+      );
+    } catch (error) {
+      console.error('Erro ao carregar receitas:', error);
+      setErro(
+        error.message ||
+        'Não foi possível carregar as receitas. Tente novamente.'
+      );
+    } finally {
+      setCarregando(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    carregarReceitas();
+  }, [carregarReceitas]);
+
+  const receitasFiltradas = useMemo(() => {
     const termo = pesquisa.trim().toLowerCase();
 
-    if (!termo) return receitasDemo;
+    if (!termo) {
+      return receitas;
+    }
 
-    return receitasDemo.filter((receita) => {
-      const titulo = receita.titulo.toLowerCase();
-      const descricao = (receita.descricao || '').toLowerCase();
+    return receitas.filter((receita) => {
+      const titulo = String(receita.titulo || '').toLowerCase();
+      const descricao = String(receita.descricao || '').toLowerCase();
 
       return titulo.includes(termo) || descricao.includes(termo);
     });
-  }, [pesquisa]);
+  }, [pesquisa, receitas]);
 
   function abrirReceita(receita) {
     navigation.navigate('ReceitaDetalhe', {
       receita,
-      receitaId: receita.id,
+      receitaId: receita.id || receita._id,
     });
   }
 
@@ -127,20 +171,6 @@ export default function ReceitasScreen({ navigation }) {
           )}
         </View>
 
-        {modoDemo && (
-          <View style={styles.avisoDemo}>
-            <Text style={styles.tituloAviso}>
-              Modo de demonstração
-            </Text>
-
-            <Text style={styles.textoAviso}>
-              As receitas abaixo são exemplos visuais. Ainda não
-              foram carregadas do servidor e não tiveram sua
-              compatibilidade com restrições alimentares verificada.
-            </Text>
-          </View>
-        )}
-
         <View style={styles.tituloListaContainer}>
           <Text style={styles.tituloLista}>
             {pesquisa.trim()
@@ -149,21 +179,42 @@ export default function ReceitasScreen({ navigation }) {
           </Text>
 
           <Text style={styles.contagem}>
-            {receitas.length}
+            {receitasFiltradas.length}
           </Text>
         </View>
 
         {carregando ? (
           <View style={styles.estado}>
             <ActivityIndicator size="large" color="#F5A623" />
+
             <Text style={styles.textoEstado}>
               Carregando receitas...
             </Text>
           </View>
-        ) : receitas.length > 0 ? (
-          receitas.map((receita) => (
+        ) : erro ? (
+          <View style={styles.semResultados}>
+            <Text style={styles.tituloSemResultados}>
+              Não foi possível carregar
+            </Text>
+
+            <Text style={styles.textoSemResultados}>
+              {erro}
+            </Text>
+
             <TouchableOpacity
-              key={receita.id}
+              style={styles.botaoLimpar}
+              onPress={carregarReceitas}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.textoBotaoLimpar}>
+                Tentar novamente
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : receitasFiltradas.length > 0 ? (
+          receitasFiltradas.map((receita, index) => (
+            <TouchableOpacity
+              key={receita.id || receita._id || `receita-${index}`}
               style={styles.cardReceita}
               onPress={() => abrirReceita(receita)}
               activeOpacity={0.8}
@@ -178,8 +229,9 @@ export default function ReceitasScreen({ navigation }) {
                 ) : (
                   <View style={styles.imagemPlaceholder}>
                     <Text style={styles.iniciais}>
-                      {receita.titulo
+                      {String(receita.titulo || 'R')
                         .split(' ')
+                        .filter(Boolean)
                         .slice(0, 2)
                         .map((palavra) => palavra[0])
                         .join('')
@@ -191,7 +243,7 @@ export default function ReceitasScreen({ navigation }) {
 
               <View style={styles.dadosReceita}>
                 <Text style={styles.nomeReceita}>
-                  {receita.titulo || receita.nome || 'Receita sem título'}
+                  {receita.titulo || 'Receita sem título'}
                 </Text>
 
                 {!!receita.descricao && (
@@ -211,22 +263,38 @@ export default function ReceitasScreen({ navigation }) {
         ) : (
           <View style={styles.semResultados}>
             <Text style={styles.tituloSemResultados}>
-              Nenhuma receita encontrada
+              {pesquisa.trim()
+                ? 'Nenhuma receita encontrada'
+                : 'Nenhuma receita disponível'}
             </Text>
 
             <Text style={styles.textoSemResultados}>
-              Não encontramos receitas para "{pesquisa}".
-              Tente outro termo de pesquisa.
+              {pesquisa.trim()
+                ? `Não encontramos receitas para "${pesquisa}". Tente outro termo de pesquisa.`
+                : 'Ainda não existem receitas para exibir.'}
             </Text>
 
-            <TouchableOpacity
-              style={styles.botaoLimpar}
-              onPress={limparPesquisa}
-            >
-              <Text style={styles.textoBotaoLimpar}>
-                Limpar pesquisa
-              </Text>
-            </TouchableOpacity>
+            {pesquisa.trim() && (
+              <TouchableOpacity
+                style={styles.botaoLimpar}
+                onPress={limparPesquisa}
+              >
+                <Text style={styles.textoBotaoLimpar}>
+                  Limpar pesquisa
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {!pesquisa.trim() && (
+              <TouchableOpacity
+                style={styles.botaoLimpar}
+                onPress={carregarReceitas}
+              >
+                <Text style={styles.textoBotaoLimpar}>
+                  Atualizar receitas
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </ScrollView>
@@ -329,28 +397,6 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
   },
 
-  avisoDemo: {
-    backgroundColor: '#FFF7E8',
-    borderWidth: 1,
-    borderColor: '#F3D8A7',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 22,
-  },
-
-  tituloAviso: {
-    color: '#8A5A0A',
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-
-  textoAviso: {
-    color: '#795D32',
-    fontSize: 12,
-    lineHeight: 18,
-  },
-
   tituloListaContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -446,6 +492,7 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontSize: 13,
     marginTop: 12,
+    textAlign: 'center',
   },
 
   semResultados: {

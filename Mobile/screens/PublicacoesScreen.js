@@ -1,5 +1,10 @@
 
-import React, { useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useMemo,
+  useState,
+} from 'react';
+
 import {
   View,
   Text,
@@ -8,73 +13,262 @@ import {
   TouchableOpacity,
   StyleSheet,
   StatusBar,
+  ActivityIndicator,
+  RefreshControl,
+  Image,
+  Alert,
 } from 'react-native';
 
-const publicacoesDemo = [
-  {
-    id: '1',
-    autor: 'Mariana Costa',
-    iniciais: 'MC',
-    titulo: 'Panqueca de banana e aveia',
-    descricao:
-      'Uma opção prática para o café da manhã, feita com poucos ingredientes.',
-    categoria: 'Café da manhã',
-    ingredientes: ['Banana', 'Aveia', 'Ovo'],
-  },
-  {
-    id: '2',
-    autor: 'Lucas Ferreira',
-    iniciais: 'LF',
-    titulo: 'Bolo caseiro de cenoura',
-    descricao:
-      'Receita caseira para compartilhar com a família no lanche da tarde.',
-    categoria: 'Lanche',
-    ingredientes: ['Cenoura', 'Farinha de trigo', 'Ovo'],
-  },
-  {
-    id: '3',
-    autor: 'Ana Oliveira',
-    iniciais: 'AO',
-    titulo: 'Salada colorida',
-    descricao:
-      'Uma combinação simples de vegetais para acompanhar suas refeições.',
-    categoria: 'Almoço',
-    ingredientes: ['Alface', 'Tomate', 'Cenoura'],
-  },
-];
+import { useFocusEffect } from '@react-navigation/native';
+import apiService from '../services/api';
 
 export default function PublicacoesScreen({ navigation }) {
   const [busca, setBusca] = useState('');
+  const [publicacoes, setPublicacoes] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [atualizando, setAtualizando] = useState(false);
+  const [erro, setErro] = useState('');
+  const [excluindoId, setExcluindoId] = useState(null);
+
+  const carregarPublicacoes = useCallback(
+    async (atualizacao = false) => {
+      if (atualizacao) {
+        setAtualizando(true);
+      } else {
+        setCarregando(true);
+      }
+
+      setErro('');
+
+      try {
+        const resposta = await apiService.listRecipes();
+
+        if (!resposta?.success) {
+          throw new Error(
+            resposta?.message ||
+              'Não foi possível carregar as receitas.'
+          );
+        }
+
+        const dados = resposta.data;
+
+        const lista = Array.isArray(dados)
+          ? dados
+          : Array.isArray(dados?.recipes)
+            ? dados.recipes
+            : Array.isArray(dados?.receitas)
+              ? dados.receitas
+              : [];
+
+        setPublicacoes(lista);
+      } catch (error) {
+        setErro(
+          error?.message || 'Erro ao carregar publicações.'
+        );
+      } finally {
+        setCarregando(false);
+        setAtualizando(false);
+      }
+    },
+    []
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      carregarPublicacoes();
+    }, [carregarPublicacoes])
+  );
 
   const publicacoesFiltradas = useMemo(() => {
     const termo = busca.trim().toLowerCase();
 
     if (!termo) {
-      return publicacoesDemo;
+      return publicacoes;
     }
 
-    return publicacoesDemo.filter((publicacao) => {
+    return publicacoes.filter((item) => {
+      const titulo = String(item.titulo || '').toLowerCase();
+      const descricao = String(
+        item.descricao || ''
+      ).toLowerCase();
+
+      const autor = String(
+        item.autor?.nome ||
+          item.usuario?.nome ||
+          item.user?.nome ||
+          item.nome_usuario ||
+          ''
+      ).toLowerCase();
+
       return (
-        publicacao.titulo.toLowerCase().includes(termo) ||
-        publicacao.autor.toLowerCase().includes(termo) ||
-        publicacao.categoria.toLowerCase().includes(termo)
+        titulo.includes(termo) ||
+        descricao.includes(termo) ||
+        autor.includes(termo)
       );
     });
-  }, [busca]);
+  }, [busca, publicacoes]);
 
   function abrirFormulario() {
     navigation.navigate('ReceitaFormulario');
   }
 
-  function abrirReceita(publicacao) {
+  function obterId(receita) {
+    return receita.id || receita._id || receita.recipe_id;
+  }
+
+  function obterIngredientes(receita) {
+    const valor = receita.ingredientes;
+
+    if (Array.isArray(valor)) {
+      return valor
+        .map((item) =>
+          typeof item === 'string'
+            ? item
+            : item?.nome || item?.ingrediente || ''
+        )
+        .filter(Boolean);
+    }
+
+    if (typeof valor === 'string') {
+      try {
+        const convertido = JSON.parse(valor);
+
+        if (Array.isArray(convertido)) {
+          return convertido.map((item) =>
+            typeof item === 'string'
+              ? item
+              : item?.nome || item?.ingrediente || ''
+          ).filter(Boolean);
+        }
+      } catch {
+        return valor
+          .split(/\r?\n|;/)
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+
+      return valor
+        .split(/\r?\n|;/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    return [];
+  }
+
+  function obterAutor(receita) {
+    return (
+      receita.autor?.nome ||
+      receita.usuario?.nome ||
+      receita.user?.nome ||
+      receita.nome_usuario ||
+      'Comunidade Safe Bite'
+    );
+  }
+
+  function obterIniciais(nome) {
+    return String(nome || '')
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((parte) => parte[0])
+      .join('')
+      .toUpperCase();
+  }
+
+  function obterImagem(receita) {
+    return (
+      receita.image_url ||
+      receita.imagem_url ||
+      receita.imagem ||
+      receita.image ||
+      null
+    );
+  }
+
+  function abrirReceita(receita) {
     navigation.navigate('ReceitaDetalhe', {
       receita: {
-        titulo: publicacao.titulo,
-        descricao: publicacao.descricao,
-        ingredientes: publicacao.ingredientes,
-        modoPreparo: [],
+        ...receita,
+        id: obterId(receita),
+        titulo: receita.titulo,
+        descricao: receita.descricao || '',
+        ingredientes: obterIngredientes(receita),
+        modoPreparo:
+          receita.modo_preparo ||
+          receita.modoPreparo ||
+          '',
       },
     });
+  }
+
+  function confirmarExclusao(publicacao) {
+    const id = obterId(publicacao);
+
+    if (!id) {
+      Alert.alert(
+        'Não foi possível excluir',
+        'Esta publicação não possui um identificador válido.'
+      );
+      return;
+    }
+
+    if (excluindoId !== null) {
+      return;
+    }
+
+    Alert.alert(
+      'Excluir publicação',
+      `Deseja realmente excluir "${publicacao.titulo || 'esta receita'}"? Esta ação não pode ser desfeita.`,
+      [
+        {
+          text: 'Cancelar',
+          style: 'cancel',
+        },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: () => executarExclusao(publicacao, id),
+        },
+      ]
+    );
+  }
+
+  async function executarExclusao(publicacao, id) {
+    if (excluindoId !== null) {
+      return;
+    }
+
+    setExcluindoId(String(id));
+
+    try {
+      const resposta = await apiService.deleteRecipe(id);
+
+      if (resposta?.success === false) {
+        throw new Error(
+          resposta.message || 'Não foi possível excluir a receita.'
+        );
+      }
+
+      setPublicacoes((atuais) =>
+        atuais.filter(
+          (item) => String(obterId(item)) !== String(id)
+        )
+      );
+
+      Alert.alert(
+        'Publicação excluída',
+        'A receita foi removida com sucesso.'
+      );
+    } catch (error) {
+      Alert.alert(
+        'Erro ao excluir',
+        error?.message ||
+          'Não foi possível excluir a publicação. Tente novamente.'
+      );
+    } finally {
+      setExcluindoId(null);
+    }
   }
 
   return (
@@ -85,7 +279,21 @@ export default function PublicacoesScreen({ navigation }) {
       />
 
       <View style={styles.cabecalho}>
-        <View>
+        <TouchableOpacity
+          style={styles.botaoVoltar}
+          onPress={() => {
+            if (navigation.canGoBack()) {
+              navigation.goBack();
+            }
+          }}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Voltar"
+        >
+          <Text style={styles.textoVoltar}>‹</Text>
+        </TouchableOpacity>
+
+        <View style={styles.cabecalhoInfo}>
           <Text style={styles.tituloPagina}>Publicações</Text>
           <Text style={styles.subtitulo}>
             Receitas compartilhadas pela comunidade
@@ -107,6 +315,13 @@ export default function PublicacoesScreen({ navigation }) {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.conteudo}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={atualizando}
+            onRefresh={() => carregarPublicacoes(true)}
+            colors={['#F5A623']}
+          />
+        }
       >
         <View style={styles.banner}>
           <Text style={styles.bannerTitulo}>
@@ -136,7 +351,7 @@ export default function PublicacoesScreen({ navigation }) {
         <View style={styles.buscaContainer}>
           <TextInput
             style={styles.inputBusca}
-            placeholder="Buscar por receita, autor ou categoria"
+            placeholder="Buscar por receita ou autor"
             placeholderTextColor="#9CA3AF"
             value={busca}
             onChangeText={setBusca}
@@ -157,79 +372,161 @@ export default function PublicacoesScreen({ navigation }) {
             : 'publicações encontradas'}
         </Text>
 
-        {publicacoesFiltradas.length > 0 ? (
-          publicacoesFiltradas.map((publicacao) => (
+        {carregando ? (
+          <View style={styles.vazio}>
+            <ActivityIndicator size="large" color="#F5A623" />
+            <Text style={styles.vazioDescricao}>
+              Carregando publicações...
+            </Text>
+          </View>
+        ) : erro ? (
+          <View style={styles.vazio}>
+            <Text style={styles.vazioTitulo}>
+              Não foi possível carregar as receitas
+            </Text>
+
+            <Text style={styles.vazioDescricao}>{erro}</Text>
+
             <TouchableOpacity
-              key={publicacao.id}
-              style={styles.cartao}
-              onPress={() => abrirReceita(publicacao)}
-              activeOpacity={0.85}
+              style={styles.botaoPublicar}
+              onPress={() => carregarPublicacoes()}
             >
-              <View style={styles.autorLinha}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarTexto}>
-                    {publicacao.iniciais}
-                  </Text>
-                </View>
-
-                <View style={styles.autorInfo}>
-                  <Text style={styles.nomeAutor}>
-                    {publicacao.autor}
-                  </Text>
-
-                  <Text style={styles.categoria}>
-                    {publicacao.categoria}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.imagemPlaceholder}>
-                <Text style={styles.iniciaisReceita}>
-                  {publicacao.titulo
-                    .split(' ')
-                    .slice(0, 2)
-                    .map((palavra) => palavra[0])
-                    .join('')
-                    .toUpperCase()}
-                </Text>
-              </View>
-
-              <View style={styles.cartaoConteudo}>
-                <Text style={styles.tituloReceita}>
-                  {publicacao.titulo}
-                </Text>
-
-                <Text style={styles.descricaoReceita}>
-                  {publicacao.descricao}
-                </Text>
-
-                <View style={styles.rodapeCartao}>
-                  <Text style={styles.textoIngredientes}>
-                    {publicacao.ingredientes.length} ingredientes
-                  </Text>
-
-                  <Text style={styles.linkDetalhes}>
-                    Ver detalhes
-                  </Text>
-                </View>
-              </View>
+              <Text style={styles.textoBotaoPublicar}>
+                Tentar novamente
+              </Text>
             </TouchableOpacity>
-          ))
+          </View>
+        ) : publicacoesFiltradas.length > 0 ? (
+          publicacoesFiltradas.map((publicacao, index) => {
+            const id = obterId(publicacao);
+            const autor = obterAutor(publicacao);
+            const ingredientesReceita =
+              obterIngredientes(publicacao);
+            const imagem = obterImagem(publicacao);
+            const estaExcluindo =
+              excluindoId !== null &&
+              String(excluindoId) === String(id);
+
+            return (
+              <View
+                key={String(id || index)}
+                style={styles.cartao}
+              >
+                <TouchableOpacity
+                  onPress={() => abrirReceita(publicacao)}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.autorLinha}>
+                    <View style={styles.avatar}>
+                      <Text style={styles.avatarTexto}>
+                        {obterIniciais(autor)}
+                      </Text>
+                    </View>
+
+                    <View style={styles.autorInfo}>
+                      <Text style={styles.nomeAutor}>
+                        {autor}
+                      </Text>
+                      <Text style={styles.categoria}>
+                        Receita publicada
+                      </Text>
+                    </View>
+                  </View>
+
+                  {imagem ? (
+                    <Image
+                      source={{ uri: imagem }}
+                      style={styles.imagemReceita}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={styles.imagemPlaceholder}>
+                      <Text style={styles.iniciaisReceita}>
+                        {obterIniciais(
+                          publicacao.titulo || 'Receita'
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  <View style={styles.cartaoConteudo}>
+                    <Text style={styles.tituloReceita}>
+                      {publicacao.titulo || 'Receita sem título'}
+                    </Text>
+
+                    <Text style={styles.descricaoReceita}>
+                      {publicacao.descricao || 'Sem descrição.'}
+                    </Text>
+
+                    <View style={styles.rodapeCartao}>
+                      <Text style={styles.textoIngredientes}>
+                        {ingredientesReceita.length} ingredientes
+                      </Text>
+
+                      <Text style={styles.linkDetalhes}>
+                        Ver detalhes
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+
+                <View style={styles.areaExclusao}>
+                  <TouchableOpacity
+                    style={[
+                      styles.botaoExcluir,
+                      estaExcluindo && styles.botaoExcluirDesabilitado,
+                    ]}
+                    onPress={() => confirmarExclusao(publicacao)}
+                    disabled={excluindoId !== null}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Excluir ${publicacao.titulo || 'publicação'}`}
+                  >
+                    {estaExcluindo ? (
+                      <ActivityIndicator
+                        size="small"
+                        color="#C62828"
+                      />
+                    ) : (
+                      <Text style={styles.textoExcluir}>
+                        Excluir publicação
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })
         ) : (
           <View style={styles.vazio}>
             <Text style={styles.vazioTitulo}>
-              Nenhuma publicação encontrada
+              {busca
+                ? 'Nenhuma publicação encontrada'
+                : 'Ainda não há receitas publicadas'}
             </Text>
 
             <Text style={styles.vazioDescricao}>
-              Tente pesquisar por outro nome ou categoria.
+              {busca
+                ? 'Tente pesquisar por outro nome.'
+                : 'Seja a primeira pessoa a compartilhar uma receita com a comunidade.'}
             </Text>
 
-            <TouchableOpacity onPress={() => setBusca('')}>
-              <Text style={styles.linkLimpar}>
-                Limpar pesquisa
-              </Text>
-            </TouchableOpacity>
+            {busca ? (
+              <TouchableOpacity onPress={() => setBusca('')}>
+                <Text style={styles.linkLimpar}>
+                  Limpar pesquisa
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.botaoPublicar}
+                onPress={abrirFormulario}
+              >
+                <Text style={styles.textoBotaoPublicar}>
+                  Registrar receita
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -249,23 +546,40 @@ const styles = StyleSheet.create({
 
   cabecalho: {
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 18,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     borderBottomWidth: 1,
     borderBottomColor: '#EEEEEE',
   },
 
+  botaoVoltar: {
+    width: 35,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    marginRight: 8,
+  },
+
+  textoVoltar: {
+    fontSize: 36,
+    lineHeight: 40,
+    color: '#1A1A1A',
+  },
+
+  cabecalhoInfo: {
+    flex: 1,
+  },
+
   tituloPagina: {
-    fontSize: 25,
+    fontSize: 23,
     fontWeight: '800',
     color: '#1A1A1A',
   },
 
   subtitulo: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#6B7280',
     marginTop: 5,
   },
@@ -277,6 +591,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5A623',
     alignItems: 'center',
     justifyContent: 'center',
+    marginLeft: 8,
   },
 
   simboloAdicionar: {
@@ -317,6 +632,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 10,
+    marginTop: 12,
   },
 
   textoBotaoPublicar: {
@@ -418,6 +734,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
+  imagemReceita: {
+    height: 145,
+    width: '100%',
+    backgroundColor: '#EEEEEE',
+  },
+
   iniciaisReceita: {
     color: '#B77912',
     fontSize: 35,
@@ -458,6 +780,32 @@ const styles = StyleSheet.create({
 
   linkDetalhes: {
     color: '#16803D',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  areaExclusao: {
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    alignItems: 'flex-end',
+  },
+
+  botaoExcluir: {
+    minHeight: 36,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  botaoExcluirDesabilitado: {
+    opacity: 0.6,
+  },
+
+  textoExcluir: {
+    color: '#C62828',
     fontSize: 12,
     fontWeight: '700',
   },

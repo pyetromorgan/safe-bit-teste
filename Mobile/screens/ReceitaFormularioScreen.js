@@ -10,8 +10,10 @@ import {
   StyleSheet,
   StatusBar,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import apiService from '../services/api';
 
 export default function ReceitaFormularioScreen({ navigation }) {
   const [titulo, setTitulo] = useState('');
@@ -21,40 +23,44 @@ export default function ReceitaFormularioScreen({ navigation }) {
   const [tempoPreparo, setTempoPreparo] = useState('');
   const [rendimento, setRendimento] = useState('');
   const [imagens, setImagens] = useState([]);
+  const [salvando, setSalvando] = useState(false);
 
   async function selecionarImagens() {
     if (imagens.length >= 5) {
-      Alert.alert(
-        'Limite atingido',
-        'Você pode selecionar até 5 imagens.'
-      );
+      Alert.alert('Limite atingido', 'Você pode selecionar até 5 imagens.');
       return;
     }
 
-    const permissao =
-      await ImagePicker.requestMediaLibraryPermissionsAsync();
+    try {
+      const permissao =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-    if (!permissao.granted) {
-      Alert.alert(
-        'Permissão necessária',
-        'Permita o acesso à galeria para selecionar imagens.'
-      );
-      return;
-    }
+      if (!permissao.granted) {
+        Alert.alert(
+          'Permissão necessária',
+          'Permita o acesso à galeria para selecionar imagens.'
+        );
+        return;
+      }
 
-    const resultado = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      selectionLimit: 5 - imagens.length,
-      quality: 0.8,
-    });
+      const resultado = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: 5 - imagens.length,
+        quality: 0.8,
+      });
 
-    if (!resultado.canceled) {
-      const novasImagens = resultado.assets.map((item) => item.uri);
+      if (!resultado.canceled) {
+        const novasImagens = resultado.assets.map((item) => item.uri);
 
-      setImagens((anteriores) =>
-        [...anteriores, ...novasImagens].slice(0, 5)
-      );
+        setImagens((anteriores) =>
+          [...anteriores, ...novasImagens]
+            .filter((uri, index, lista) => lista.indexOf(uri) === index)
+            .slice(0, 5)
+        );
+      }
+    } catch (error) {
+      Alert.alert('Erro', 'Não foi possível abrir a galeria de imagens.');
     }
   }
 
@@ -70,15 +76,36 @@ export default function ReceitaFormularioScreen({ navigation }) {
         'Título inválido',
         'Informe um nome com pelo menos 3 caracteres.'
       );
-      return;
+      return false;
     }
 
-    if (!ingredientes.trim()) {
+    if (titulo.trim().length > 255) {
+      Alert.alert(
+        'Título muito longo',
+        'O título deve ter no máximo 255 caracteres.'
+      );
+      return false;
+    }
+
+    if (descricao.trim().length > 1000) {
+      Alert.alert(
+        'Descrição muito longa',
+        'A descrição deve ter no máximo 1.000 caracteres.'
+      );
+      return false;
+    }
+
+    const listaIngredientes = ingredientes
+      .split('\n')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+
+    if (listaIngredientes.length === 0) {
       Alert.alert(
         'Ingredientes obrigatórios',
-        'Informe os ingredientes da receita.'
+        'Informe pelo menos um ingrediente, colocando um por linha.'
       );
-      return;
+      return false;
     }
 
     if (modoPreparo.trim().length < 10) {
@@ -86,45 +113,142 @@ export default function ReceitaFormularioScreen({ navigation }) {
         'Modo de preparo',
         'Descreva o preparo com pelo menos 10 caracteres.'
       );
+      return false;
+    }
+
+    if (tempoPreparo.trim().length > 50) {
+      Alert.alert(
+        'Tempo inválido',
+        'O tempo de preparo deve ter no máximo 50 caracteres.'
+      );
+      return false;
+    }
+
+    if (rendimento.trim().length > 50) {
+      Alert.alert(
+        'Rendimento inválido',
+        'O rendimento deve ter no máximo 50 caracteres.'
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  function prepararArquivoImagem(uri) {
+    if (!uri) {
+      return null;
+    }
+
+    const nomeArquivo = uri.split('/').pop() || 'receita.jpg';
+    const extensao = nomeArquivo.split('.').pop()?.toLowerCase();
+
+    const tiposMime = {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      gif: 'image/gif',
+    };
+
+    return {
+      uri,
+      name: nomeArquivo.includes('.') ? nomeArquivo : 'receita.jpg',
+      type: tiposMime[extensao] || 'image/jpeg',
+    };
+  }
+
+  async function salvarReceita(status = 'rascunho') {
+    if (salvando) {
       return;
     }
 
-    Alert.alert(
-      'Formulário validado',
-      'Os dados foram preenchidos corretamente. O envio ao servidor será implementado na integração com o backend.',
-      [
-        {
-          text: 'Voltar',
-          onPress: () => navigation.goBack(),
-        },
-        {
-          text: 'Continuar editando',
-          style: 'cancel',
-        },
-      ]
-    );
+    if (!validarFormulario()) {
+      return;
+    }
+
+    setSalvando(true);
+
+    try {
+      const listaIngredientes = ingredientes
+        .split('\n')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+
+      const dadosReceita = {
+        titulo: titulo.trim(),
+        descricao: descricao.trim(),
+        ingredientes: JSON.stringify(listaIngredientes),
+        modo_preparo: modoPreparo.trim(),
+        tempo_preparo: tempoPreparo.trim(),
+        rendimento: rendimento.trim(),
+        status,
+      };
+
+      // O backend aceita somente uma imagem no campo "image".
+      const arquivoImagem = imagens.length > 0
+        ? prepararArquivoImagem(imagens[0])
+        : null;
+
+      const resposta = await apiService.createRecipe(
+        dadosReceita,
+        arquivoImagem
+      );
+
+      if (!resposta?.success) {
+        throw new Error(
+          resposta?.message || 'Não foi possível cadastrar a receita.'
+        );
+      }
+
+      Alert.alert(
+        'Receita cadastrada',
+        status === 'publicada'
+          ? 'Sua receita foi publicada com sucesso!'
+          : 'Sua receita foi salva como rascunho.',
+        [
+          {
+            text: 'OK',
+            onPress: () => navigation.goBack(),
+          },
+        ]
+      );
+    } catch (error) {
+      let mensagem = error?.message ||
+        'Ocorreu um erro ao salvar sua receita.';
+
+      if (error?.status === 401 || error?.status === 403) {
+        mensagem =
+          'Sua sessão pode ter expirado ou você não está autenticado. ' +
+          'Entre novamente no aplicativo e tente de novo.';
+      } else if (error?.status === 400 && error?.data?.errors?.length) {
+        mensagem = error.data.errors
+          .map((item) => item.message)
+          .join('\n');
+      }
+
+      Alert.alert('Não foi possível salvar', mensagem);
+    } finally {
+      setSalvando(false);
+    }
   }
 
   return (
     <View style={styles.container}>
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor="#FFFFFF"
-      />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
       <View style={styles.cabecalho}>
         <TouchableOpacity
           style={styles.botaoVoltar}
           onPress={() => navigation.goBack()}
+          disabled={salvando}
           accessibilityRole="button"
           accessibilityLabel="Voltar"
         >
           <Text style={styles.textoVoltar}>‹</Text>
         </TouchableOpacity>
 
-        <Text style={styles.tituloCabecalho}>
-          Registrar receita
-        </Text>
+        <Text style={styles.tituloCabecalho}>Registrar receita</Text>
 
         <View style={styles.espacador} />
       </View>
@@ -134,9 +258,7 @@ export default function ReceitaFormularioScreen({ navigation }) {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.tituloPagina}>
-          Compartilhe seu prato
-        </Text>
+        <Text style={styles.tituloPagina}>Compartilhe seu prato</Text>
 
         <Text style={styles.subtitulo}>
           Preencha as informações para apresentar sua receita
@@ -144,21 +266,16 @@ export default function ReceitaFormularioScreen({ navigation }) {
         </Text>
 
         <View style={styles.aviso}>
-          <Text style={styles.avisoTitulo}>
-            Segurança alimentar
-          </Text>
+          <Text style={styles.avisoTitulo}>Segurança alimentar</Text>
 
           <Text style={styles.avisoTexto}>
-            Informe os ingredientes corretamente. As restrições
-            e possíveis incompatibilidades serão verificadas
-            quando a integração com o servidor estiver pronta.
+            Informe os ingredientes corretamente. O Safe Bite tentará
+            identificar possíveis restrições alimentares a partir deles.
           </Text>
         </View>
 
         <View style={styles.cartao}>
-          <Text style={styles.tituloSecao}>
-            Informações básicas
-          </Text>
+          <Text style={styles.tituloSecao}>Informações básicas</Text>
 
           <Text style={styles.label}>Nome da receita *</Text>
 
@@ -168,7 +285,8 @@ export default function ReceitaFormularioScreen({ navigation }) {
             onChangeText={setTitulo}
             placeholder="Ex.: Panqueca de banana"
             placeholderTextColor="#9CA3AF"
-            maxLength={100}
+            maxLength={255}
+            editable={!salvando}
           />
 
           <Text style={styles.label}>Descrição</Text>
@@ -180,8 +298,9 @@ export default function ReceitaFormularioScreen({ navigation }) {
             placeholder="Conte um pouco sobre o prato"
             placeholderTextColor="#9CA3AF"
             multiline
-            maxLength={500}
+            maxLength={1000}
             textAlignVertical="top"
+            editable={!salvando}
           />
 
           <Text style={styles.label}>Tempo de preparo</Text>
@@ -193,6 +312,7 @@ export default function ReceitaFormularioScreen({ navigation }) {
             placeholder="Ex.: 30 minutos"
             placeholderTextColor="#9CA3AF"
             maxLength={50}
+            editable={!salvando}
           />
 
           <Text style={styles.label}>Rendimento</Text>
@@ -204,13 +324,12 @@ export default function ReceitaFormularioScreen({ navigation }) {
             placeholder="Ex.: 4 porções"
             placeholderTextColor="#9CA3AF"
             maxLength={50}
+            editable={!salvando}
           />
         </View>
 
         <View style={styles.cartao}>
-          <Text style={styles.tituloSecao}>
-            Ingredientes
-          </Text>
+          <Text style={styles.tituloSecao}>Ingredientes</Text>
 
           <Text style={styles.instrucao}>
             Escreva um ingrediente por linha, incluindo as quantidades.
@@ -224,13 +343,12 @@ export default function ReceitaFormularioScreen({ navigation }) {
             placeholderTextColor="#9CA3AF"
             multiline
             textAlignVertical="top"
+            editable={!salvando}
           />
         </View>
 
         <View style={styles.cartao}>
-          <Text style={styles.tituloSecao}>
-            Modo de preparo
-          </Text>
+          <Text style={styles.tituloSecao}>Modo de preparo</Text>
 
           <Text style={styles.instrucao}>
             Descreva as etapas na ordem em que devem ser realizadas.
@@ -246,22 +364,23 @@ export default function ReceitaFormularioScreen({ navigation }) {
             placeholderTextColor="#9CA3AF"
             multiline
             textAlignVertical="top"
+            editable={!salvando}
           />
         </View>
 
         <View style={styles.cartao}>
-          <Text style={styles.tituloSecao}>
-            Imagens da receita
-          </Text>
+          <Text style={styles.tituloSecao}>Imagens da receita</Text>
 
           <Text style={styles.instrucao}>
-            Selecione até 5 imagens da galeria do celular.
+            Selecione até 5 imagens. Atualmente, somente a primeira será
+            enviada ao servidor.
           </Text>
 
           <TouchableOpacity
             style={styles.botaoImagem}
             onPress={selecionarImagens}
             activeOpacity={0.8}
+            disabled={salvando}
           >
             <Text style={styles.textoBotaoImagem}>
               Selecionar imagens ({imagens.length}/5)
@@ -280,6 +399,7 @@ export default function ReceitaFormularioScreen({ navigation }) {
                   <TouchableOpacity
                     style={styles.botaoRemoverImagem}
                     onPress={() => removerImagem(uri)}
+                    disabled={salvando}
                     accessibilityRole="button"
                     accessibilityLabel={`Remover imagem ${index + 1}`}
                   >
@@ -292,12 +412,34 @@ export default function ReceitaFormularioScreen({ navigation }) {
         </View>
 
         <TouchableOpacity
-          style={styles.botaoSalvar}
-          onPress={validarFormulario}
+          style={[
+            styles.botaoSalvar,
+            salvando && styles.botaoDesabilitado,
+          ]}
+          onPress={() => salvarReceita('publicada')}
           activeOpacity={0.8}
+          disabled={salvando}
         >
-          <Text style={styles.textoBotaoSalvar}>
-            Validar receita
+          {salvando ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.textoBotaoSalvar}>
+              Publicar receita
+            </Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.botaoRascunho,
+            salvando && styles.botaoDesabilitado,
+          ]}
+          onPress={() => salvarReceita('rascunho')}
+          activeOpacity={0.8}
+          disabled={salvando}
+        >
+          <Text style={styles.textoBotaoRascunho}>
+            Salvar como rascunho
           </Text>
         </TouchableOpacity>
 
@@ -305,15 +447,12 @@ export default function ReceitaFormularioScreen({ navigation }) {
           style={styles.botaoCancelar}
           onPress={() => navigation.goBack()}
           activeOpacity={0.8}
+          disabled={salvando}
         >
-          <Text style={styles.textoBotaoCancelar}>
-            Cancelar
-          </Text>
+          <Text style={styles.textoBotaoCancelar}>Cancelar</Text>
         </TouchableOpacity>
 
-        <Text style={styles.rodape}>
-          * Campos obrigatórios
-        </Text>
+        <Text style={styles.rodape}>* Campos obrigatórios</Text>
       </ScrollView>
     </View>
   );
@@ -520,10 +659,30 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
+  botaoDesabilitado: {
+    opacity: 0.6,
+  },
+
   textoBotaoSalvar: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '800',
+  },
+
+  botaoRascunho: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: '#F5A623',
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+
+  textoBotaoRascunho: {
+    color: '#A66B0A',
+    fontSize: 14,
+    fontWeight: '700',
   },
 
   botaoCancelar: {

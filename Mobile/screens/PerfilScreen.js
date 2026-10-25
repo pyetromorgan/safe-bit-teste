@@ -12,6 +12,8 @@ import {
   StatusBar,
 } from 'react-native';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 export default function PerfilScreen({ navigation }) {
   const [editando, setEditando] = useState(false);
 
@@ -45,11 +47,27 @@ export default function PerfilScreen({ navigation }) {
         {
           text: 'Sair',
           style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              'Aviso',
-              'A função de logout será conectada ao sistema de autenticação posteriormente.'
-            );
+          onPress: async () => {
+            try {
+              // Remove os dados de autenticação salvos
+              await AsyncStorage.multiRemove([
+                'safebite_token',
+                'safebite_user',
+              ]);
+
+              // Limpa o histórico de navegação e retorna ao login
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Login' }],
+              });
+            } catch (error) {
+              console.error('Erro ao sair da conta:', error);
+
+              Alert.alert(
+                'Erro',
+                'Não foi possível sair da conta. Tente novamente.'
+              );
+            }
           },
         },
       ]
@@ -107,6 +125,7 @@ export default function PerfilScreen({ navigation }) {
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Nome completo</Text>
+
             <TextInput
               style={[
                 styles.input,
@@ -122,6 +141,7 @@ export default function PerfilScreen({ navigation }) {
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>E-mail</Text>
+
             <TextInput
               style={[
                 styles.input,
@@ -186,6 +206,7 @@ export default function PerfilScreen({ navigation }) {
               <Text style={styles.optionTitle}>
                 Restrições alimentares
               </Text>
+
               <Text style={styles.optionDescription}>
                 Consulte e configure suas restrições
               </Text>

@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   StatusBar,
+  Alert,
 } from 'react-native';
 
 export default function HomeScreen({ navigation }) {
@@ -47,7 +48,19 @@ export default function HomeScreen({ navigation }) {
   ];
 
   function abrirTela(destino) {
-    navigation.navigate(destino);
+    const telaExiste = navigation
+      .getState()
+      .routeNames.includes(destino);
+
+    if (telaExiste) {
+      navigation.navigate(destino);
+      return;
+    }
+
+    Alert.alert(
+      'Tela indisponível',
+      'Esta tela ainda não está disponível na navegação do aplicativo.'
+    );
   }
 
   return (

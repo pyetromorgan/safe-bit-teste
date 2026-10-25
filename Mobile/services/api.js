@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // IMPORTANTE:
 // Substitua pelo IPv4 do computador que está rodando o backend.
 // Exemplo: http://192.168.1.10:3001
-const SERVER_URL = 'http://192.168.24.6:3001';
+const SERVER_URL = 'http://192.168.24.7:3001';
 const API_BASE_URL = `${SERVER_URL}/api`;
 
 const TOKEN_KEY = 'safebite_token';

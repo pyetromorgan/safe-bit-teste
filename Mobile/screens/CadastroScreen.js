@@ -12,6 +12,8 @@ import {
   StatusBar,
 } from 'react-native';
 
+import apiService from '../services/api';
+
 export default function CadastroScreen({ navigation }) {
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
@@ -20,9 +22,14 @@ export default function CadastroScreen({ navigation }) {
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [mostrarConfirmacao, setMostrarConfirmacao] = useState(false);
   const [erro, setErro] = useState('');
+  const [sucesso, setSucesso] = useState(false);
+  const [carregando, setCarregando] = useState(false);
 
-  function cadastrar() {
+  async function cadastrar() {
     setErro('');
+    setSucesso(false);
+
+    if (carregando) return;
 
     if (
       !nome.trim() ||
@@ -34,8 +41,9 @@ export default function CadastroScreen({ navigation }) {
       return;
     }
 
+    const emailNormalizado = email.trim().toLowerCase();
     const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-      email.trim()
+      emailNormalizado
     );
 
     if (!emailValido) {
@@ -53,11 +61,54 @@ export default function CadastroScreen({ navigation }) {
       return;
     }
 
-    // Cadastro temporário para testar a interface.
-    // A integração com o backend será feita posteriormente.
-    setErro(
-      'Cadastro validado! A criação real da conta será ativada na integração com o servidor.'
-    );
+    try {
+      setCarregando(true);
+
+      const resposta = await apiService.register({
+        nome_completo: nome.trim(),
+        email: emailNormalizado,
+        senha,
+        tem_restricao: false,
+      });
+
+      if (resposta?.success === false) {
+        throw new Error(
+          resposta.message || 'Não foi possível criar a conta.'
+        );
+      }
+
+      setSucesso(true);
+      setErro('Conta criada com sucesso! Faça login para continuar.');
+
+      setNome('');
+      setEmail('');
+      setSenha('');
+      setConfirmarSenha('');
+    } catch (error) {
+      console.error('Erro no cadastro:', error);
+
+      if (error.status === 409) {
+        setErro('Este e-mail já está cadastrado.');
+      } else if (error.status === 400) {
+        const detalhes = error.data?.errors
+          ?.map((item) => item.message)
+          .filter(Boolean)
+          .join(' ');
+
+        setErro(
+          detalhes ||
+          error.message ||
+          'Confira os dados informados.'
+        );
+      } else {
+        setErro(
+          error.message ||
+          'Não foi possível realizar o cadastro. Tente novamente.'
+        );
+      }
+    } finally {
+      setCarregando(false);
+    }
   }
 
   return (
@@ -115,6 +166,7 @@ export default function CadastroScreen({ navigation }) {
               onChangeText={(texto) => {
                 setNome(texto);
                 setErro('');
+                setSucesso(false);
               }}
               autoCapitalize="words"
               autoCorrect={false}
@@ -134,6 +186,7 @@ export default function CadastroScreen({ navigation }) {
               onChangeText={(texto) => {
                 setEmail(texto);
                 setErro('');
+                setSucesso(false);
               }}
               keyboardType="email-address"
               autoCapitalize="none"
@@ -155,6 +208,7 @@ export default function CadastroScreen({ navigation }) {
                 onChangeText={(texto) => {
                   setSenha(texto);
                   setErro('');
+                  setSucesso(false);
                 }}
                 secureTextEntry={!mostrarSenha}
                 autoCapitalize="none"
@@ -189,6 +243,7 @@ export default function CadastroScreen({ navigation }) {
                 onChangeText={(texto) => {
                   setConfirmarSenha(texto);
                   setErro('');
+                  setSucesso(false);
                 }}
                 secureTextEntry={!mostrarConfirmacao}
                 autoCapitalize="none"
@@ -220,7 +275,7 @@ export default function CadastroScreen({ navigation }) {
             <Text
               style={[
                 styles.mensagem,
-                erro.startsWith('Cadastro validado!')
+                sucesso
                   ? styles.mensagemSucesso
                   : styles.mensagemErro,
               ]}
@@ -230,11 +285,17 @@ export default function CadastroScreen({ navigation }) {
           )}
 
           <TouchableOpacity
-            style={styles.botao}
+            style={[
+              styles.botao,
+              carregando && styles.botaoDesabilitado,
+            ]}
             onPress={cadastrar}
             activeOpacity={0.8}
+            disabled={carregando}
           >
-            <Text style={styles.textoBotao}>Criar minha conta</Text>
+            <Text style={styles.textoBotao}>
+              {carregando ? 'Criando conta...' : 'Criar minha conta'}
+            </Text>
           </TouchableOpacity>
 
           <View style={styles.loginContainer}>
@@ -413,6 +474,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 4,
+  },
+
+  botaoDesabilitado: {
+    opacity: 0.6,
   },
 
   textoBotao: {

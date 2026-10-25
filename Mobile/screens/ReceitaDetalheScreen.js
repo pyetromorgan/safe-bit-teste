@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,8 @@ import {
   StyleSheet,
   StatusBar,
 } from 'react-native';
+
+import api from '../services/api';
 
 function transformarLista(valor) {
   if (Array.isArray(valor)) {
@@ -35,8 +37,138 @@ function transformarLista(valor) {
     .filter(Boolean);
 }
 
-export default function ReceitaDetalheScreen({ navigation, route }) {
+function normalizarTexto(texto) {
+  return String(texto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function obterDadosRestricoes(resposta) {
+  if (Array.isArray(resposta)) {
+    return resposta;
+  }
+
+  if (Array.isArray(resposta?.data)) {
+    return resposta.data;
+  }
+
+  return [];
+}
+
+function verificarConflitos(ingredientes, restricoes) {
+  const conflitos = [];
+
+  const ingredientesTexto = ingredientes.map((ingrediente) => {
+    if (typeof ingrediente === 'string') {
+      return ingrediente;
+    }
+
+    return (
+      ingrediente?.nome ||
+      ingrediente?.ingrediente ||
+      ingrediente?.descricao ||
+      ''
+    );
+  });
+
+  restricoes.forEach((item) => {
+    const restricao = item.restriction || item.restricao || item;
+
+    const nomeRestricao =
+      restricao.nome || 'Restrição alimentar';
+
+    const palavrasChave = [
+      ...(Array.isArray(restricao.palavras_chave)
+        ? restricao.palavras_chave
+        : []),
+      ...(Array.isArray(item.palavras_chave_personalizadas)
+        ? item.palavras_chave_personalizadas
+        : []),
+    ]
+      .filter(Boolean)
+      .map(normalizarTexto)
+      .filter(Boolean);
+
+    ingredientesTexto.forEach((ingrediente) => {
+      const ingredienteNormalizado = normalizarTexto(ingrediente);
+
+      if (!ingredienteNormalizado) {
+        return;
+      }
+
+      const palavraEncontrada = palavrasChave.find(
+        (palavra) => ingredienteNormalizado.includes(palavra)
+      );
+
+      if (palavraEncontrada) {
+        conflitos.push({
+          restricao: nomeRestricao,
+          ingrediente,
+          palavraChave: palavraEncontrada,
+        });
+      }
+    });
+  });
+
+  return conflitos.filter(
+    (conflito, index, lista) =>
+      lista.findIndex(
+        (outro) =>
+          outro.restricao === conflito.restricao &&
+          outro.ingrediente === conflito.ingrediente
+      ) === index
+  );
+}
+
+export default function ReceitaDetalheScreen({
+  navigation,
+  route,
+}) {
   const receita = route?.params?.receita || {};
+
+  const [restricoes, setRestricoes] = useState([]);
+  const [carregandoRestricoes, setCarregandoRestricoes] =
+    useState(true);
+  const [erroRestricoes, setErroRestricoes] = useState(false);
+
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregarRestricoes() {
+      try {
+        setCarregandoRestricoes(true);
+        setErroRestricoes(false);
+
+        const resposta = await api.getUserRestrictions();
+        const dados = obterDadosRestricoes(resposta);
+
+        if (ativo) {
+          setRestricoes(dados);
+        }
+      } catch (error) {
+        console.log(
+          'Erro ao carregar restrições alimentares:',
+          error.message
+        );
+
+        if (ativo) {
+          setErroRestricoes(true);
+        }
+      } finally {
+        if (ativo) {
+          setCarregandoRestricoes(false);
+        }
+      }
+    }
+
+    carregarRestricoes();
+
+    return () => {
+      ativo = false;
+    };
+  }, []);
 
   const titulo =
     receita.titulo || receita.nome || 'Detalhes da receita';
@@ -44,6 +176,11 @@ export default function ReceitaDetalheScreen({ navigation, route }) {
   const descricao = receita.descricao || '';
 
   const ingredientes = transformarLista(receita.ingredientes);
+
+  const conflitos = verificarConflitos(
+    ingredientes,
+    restricoes
+  );
 
   const modoPreparo = transformarLista(
     receita.modoPreparo || receita.modo_preparo
@@ -126,16 +263,81 @@ export default function ReceitaDetalheScreen({ navigation, route }) {
           )}
         </View>
 
-        <View style={styles.aviso}>
-          <Text style={styles.tituloAviso}>
-            Atenção às restrições alimentares
+        <View
+          style={[
+            styles.aviso,
+            !carregandoRestricoes &&
+              !erroRestricoes &&
+              conflitos.length > 0 &&
+              styles.avisoConflito,
+            erroRestricoes && styles.avisoErro,
+          ]}
+        >
+          <Text
+            style={[
+              styles.tituloAviso,
+              !carregandoRestricoes &&
+                !erroRestricoes &&
+                conflitos.length > 0 &&
+                styles.tituloAvisoConflito,
+            ]}
+          >
+            {carregandoRestricoes
+              ? 'Verificando restrições alimentares'
+              : erroRestricoes
+                ? 'Não foi possível verificar suas restrições'
+                : conflitos.length > 0
+                  ? 'Possível conflito alimentar'
+                  : 'Atenção às restrições alimentares'}
           </Text>
 
-          <Text style={styles.textoAviso}>
-            Confira os ingredientes e os rótulos dos produtos antes
-            de preparar ou consumir esta receita. A compatibilidade
-            com suas restrições ainda não foi confirmada pelo sistema.
-          </Text>
+          {carregandoRestricoes ? (
+            <Text style={styles.textoAviso}>
+              Aguarde enquanto verificamos os ingredientes com
+              suas restrições cadastradas.
+            </Text>
+          ) : erroRestricoes ? (
+            <Text style={styles.textoAviso}>
+              Não foi possível carregar suas restrições.
+              Confira sua conexão e tente novamente. A
+              compatibilidade desta receita não foi confirmada.
+            </Text>
+          ) : conflitos.length > 0 ? (
+            <>
+              <Text style={styles.textoAviso}>
+                Encontramos ingredientes que podem estar
+                relacionados às suas restrições:
+              </Text>
+
+              {conflitos.map((conflito, index) => (
+                <View
+                  key={`${conflito.restricao}-${conflito.ingrediente}-${index}`}
+                  style={styles.conflitoItem}
+                >
+                  <Text style={styles.textoConflito}>
+                    {conflito.restricao}
+                  </Text>
+
+                  <Text style={styles.detalheConflito}>
+                    Ingrediente: {String(conflito.ingrediente)}
+                  </Text>
+                </View>
+              ))}
+
+              <Text style={styles.textoAviso}>
+                Não consuma a receita sem confirmar a composição
+                dos ingredientes e dos produtos utilizados.
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.textoAviso}>
+              Nenhuma correspondência foi identificada entre
+              os ingredientes informados e suas restrições
+              cadastradas. Isso não garante que a receita seja
+              segura: confira os rótulos e possíveis
+              contaminações cruzadas.
+            </Text>
+          )}
         </View>
 
         {(tempoPreparo || rendimento) && (
@@ -173,17 +375,28 @@ export default function ReceitaDetalheScreen({ navigation, route }) {
 
           {ingredientes.length > 0 ? (
             ingredientes.map((ingrediente, index) => (
-              <View key={`${index}-${ingrediente}`} style={styles.itemLista}>
+              <View
+                key={`${index}-${typeof ingrediente === 'string' ? ingrediente : JSON.stringify(ingrediente)}`}
+                style={styles.itemLista}
+              >
                 <View style={styles.marcador} />
 
                 <Text style={styles.textoLista}>
-                  {String(ingrediente)}
+                  {typeof ingrediente === 'string'
+                    ? ingrediente
+                    : String(
+                        ingrediente?.nome ||
+                          ingrediente?.ingrediente ||
+                          ingrediente?.descricao ||
+                          ''
+                      )}
                 </Text>
               </View>
             ))
           ) : (
             <Text style={styles.textoVazio}>
-              Os ingredientes não estão disponíveis nesta demonstração.
+              Os ingredientes não estão disponíveis nesta
+              demonstração.
             </Text>
           )}
         </View>
@@ -203,13 +416,18 @@ export default function ReceitaDetalheScreen({ navigation, route }) {
                 </View>
 
                 <Text style={styles.textoPasso}>
-                  {String(passo).replace(/^\d+[.)]\s*/, '')}
+                  {String(
+                    typeof passo === 'object'
+                      ? passo?.descricao || passo?.texto || ''
+                      : passo
+                  ).replace(/^\d+[.)]\s*/, '')}
                 </Text>
               </View>
             ))
           ) : (
             <Text style={styles.textoVazio}>
-              O modo de preparo ainda não está disponível nesta demonstração.
+              O modo de preparo ainda não está disponível nesta
+              demonstração.
             </Text>
           )}
         </View>
@@ -326,6 +544,16 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
 
+  avisoConflito: {
+    backgroundColor: '#FDECEC',
+    borderColor: '#E9A5A5',
+  },
+
+  avisoErro: {
+    backgroundColor: '#F3F4F6',
+    borderColor: '#D1D5DB',
+  },
+
   tituloAviso: {
     fontSize: 13,
     fontWeight: '700',
@@ -333,10 +561,37 @@ const styles = StyleSheet.create({
     marginBottom: 7,
   },
 
+  tituloAvisoConflito: {
+    color: '#A52222',
+  },
+
   textoAviso: {
     fontSize: 12,
     lineHeight: 19,
     color: '#795D32',
+  },
+
+  conflitoItem: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#F1C5C5',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+
+  textoConflito: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#A52222',
+    marginBottom: 4,
+  },
+
+  detalheConflito: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#5F3030',
   },
 
   informacoesTempo: {

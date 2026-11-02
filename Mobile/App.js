@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
@@ -23,6 +24,9 @@ import PublicacoesScreen from './screens/PublicacoesScreen';
 import ReceitaFormularioScreen from './screens/ReceitaFormularioScreen';
 import PerfilScreen from './screens/PerfilScreen';
 import SuporteScreen from './screens/SuporteScreen';
+
+// NOVA TELA: BALANÇA NUTRICIONAL
+import BalancaScreen from './screens/Balanca';
 
 const Stack = createNativeStackNavigator();
 
@@ -127,6 +131,13 @@ export default function App() {
         <Stack.Screen
           name="Suporte"
           component={SuporteScreen}
+        />
+
+        {/* BALANÇA NUTRICIONAL */}
+
+        <Stack.Screen
+          name="Balanca"
+          component={BalancaScreen}
         />
 
       </Stack.Navigator>

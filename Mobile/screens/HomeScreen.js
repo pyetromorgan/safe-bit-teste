@@ -45,6 +45,14 @@ export default function HomeScreen({ navigation }) {
       identificador: '04',
       cor: '#8B5CF6',
     },
+    {
+      titulo: 'Balança Inteligente',
+      descricao:
+        'Acompanhe o peso dos alimentos, as calorias e as informações do ambiente por meio da integração com o dispositivo IoT.',
+      destino: 'Balanca',
+      identificador: '05',
+      cor: '#0EA5E9',
+    },
   ];
 
   function abrirTela(destino) {
